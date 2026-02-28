@@ -1,7 +1,0 @@
-# Core dependencies
-paho-mqtt>=1.6.0
-pyyaml>=6.0
-
-# Optional LLM dependencies
-anthropic>=0.20.0
-openai>=1.0.0

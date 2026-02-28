@@ -1,216 +1,266 @@
-# Device Agent
+# Device Agent - MQTT 设备管理 Skill
 
-A lightweight IoT device management agent inspired by pi-mono's "anti-framework" design philosophy.
+## 概述
 
-## Features
+Device Agent 是一个基于 pi-mono 框架的 Agent Skill，用于通过 MQTT 协议与 IoT 设备进行通信。它支持：
 
-- **Tool-centric architecture**: Every operation is a tool (connect, publish, control, query)
-- **MQTT integration**: Connect to any MQTT broker for device communication
-- **Natural language control**: Use LLM or keyword-based intent parsing
-- **Memory management**: Store and retrieve device states
-- **Standalone or pi-mono extension**: Run independently or as part of pi-mono
+- 设备状态获取（从本地缓存或实时查询）
+- 设备控制（通过 MQTT 下发指令）
+- 多设备管理
+- 状态持久化存储
 
-## Architecture
+## 架构
 
 ```
-Layer 4: Agent CLI / API
-Layer 3: Agent Runtime (Tool registration, execution, event stream)
-Layer 2: Tools (mqtt_connect, device_control, device_state_get, etc.)
-Layer 1: Primitives (MQTT Client, Memory Store, LLM Client)
+┌─────────────────────────────────────────────────────────┐
+│                   Device Agent Extension                 │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  MQTT Client │  │   File Store │  │   LLM Tools  │  │
+│  │  (连接管理)   │  │  (状态缓存)   │  │  (5个工具)   │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
+│         │                  │                  │         │
+│         └──────────────────┴──────────────────┘         │
+│                          │                              │
+│                    MQTT Broker                          │
+│                          │                              │
+│         ┌────────────────┼────────────────┐             │
+│         ▼                ▼                ▼             │
+│    ┌─────────┐      ┌─────────┐      ┌─────────┐       │
+│    │ Device 1│      │ Device 2│      │ Device N│       │
+│    └─────────┘      └─────────┘      └─────────┘       │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Installation
+## 文件结构
 
-### Basic Installation
+```
+~/.pi/agent/
+├── extensions/
+│   └── device-agent.ts       # Extension 主代码
+├── node_modules/             # mqtt 依赖
+├── package.json              # 依赖配置
+├── settings.json             # pi 设置
+└── skills/
+    └── device-agent/
+        └── SKILL.md          # LLM 使用指南
+```
+
+## 安装步骤
+
+### 1. 创建目录结构
 
 ```bash
-pip install -e .
+mkdir -p ~/.pi/agent/extensions ~/.pi/agent/skills/device-agent
 ```
 
-### With LLM Support
+### 2. 安装依赖
 
 ```bash
-pip install -e ".[all]"
+cd ~/.pi/agent
+npm init -y
+npm install mqtt
 ```
 
-## Configuration
+### 3. 部署 Extension 文件
 
-### Environment Variables
+将 `device-agent.ts` 复制到 `~/.pi/agent/extensions/`。
+
+### 4. 部署 Skill 文件
+
+将 `SKILL.md` 复制到 `~/.pi/agent/skills/device-agent/`。
+
+## 配置说明
+
+### 1. pi 设置（settings.json）
+
+创建 `~/.pi/agent/settings.json`：
+
+```json
+{
+  "lastChangelogVersion": "0.52.12",
+  "defaultProvider": "kimi-coding",
+  "defaultModel": "k2p5"
+}
+```
+
+### 2. API Key 设置
+
+通过环境变量设置：
 
 ```bash
-# MQTT
-export DEVICE_AGENT_MQTT_BROKER=localhost
-export DEVICE_AGENT_MQTT_PORT=1883
-export DEVICE_AGENT_MQTT_USERNAME=your_username
-export DEVICE_AGENT_MQTT_PASSWORD=your_password
+# Kimi For Coding
+export KIMI_API_KEY="your-api-key"
 
-# LLM (optional, for natural language)
-export ANTHROPIC_API_KEY=sk-ant-...
-# or
-export OPENAI_API_KEY=sk-...
 ```
 
-### Configuration File
+添加到 `~/.bashrc` 或 `~/.zshrc` 使其永久生效。
 
-Copy `config.example.yaml` to `config.yaml` and customize:
-
-```yaml
-mqtt:
-  broker: localhost
-  port: 1883
-  topic_prefix: home/devices
-
-llm:
-  provider: anthropic
-  model: claude-3-5-sonnet-20241022
-```
-
-## Usage
-
-### Standalone CLI
+### 查看可用模型
 
 ```bash
-# Run with environment variables
-device-agent
-
-# Run with config file
-device-agent --config config.yaml
-
-# Run with custom broker
-device-agent --broker 192.168.1.100
+pi --provider kimi-coding --list-models
 ```
 
-### Interactive Commands
+常用模型：
+- `k2p5` - Kimi K2.5（推荐）
+- `kimi-k2-thinking` - 思考模式
+- `kimi-k2.5` - Moonshot 官方模型
 
-```
-> help                    # Show help
-> status                  # Show agent status
-> devices                 # List all devices
-> connect 192.168.1.100   # Connect to MQTT broker
+## 运行方式
 
-# Natural language commands
-> 打开客厅灯              # Turn on living room light
-> turn off bedroom light  # Turn off bedroom light
-> 客厅灯状态              # Check living room light status
-```
-
-### Programmatic Usage
-
-```python
-import asyncio
-from device_agent import AgentRuntime
-from device_agent.config import Config
-from device_agent.tools import get_default_tools
-
-async def main():
-    # Load configuration
-    config = Config.load("config.yaml")
-
-    # Create runtime
-    runtime = AgentRuntime(config.to_agent_config())
-
-    # Register tools
-    runtime.register_all(get_default_tools(runtime))
-
-    # Initialize
-    await runtime.init()
-    await runtime.connect_mqtt()
-
-    # Execute tool directly
-    result = await runtime.execute("device_list", {})
-    print(result.data)
-
-    # Control device
-    result = await runtime.execute("device_control", {
-        "device_id": "living_room_light",
-        "command": "on"
-    })
-    print(result.success)
-
-    # Natural language
-    response = await runtime.run("打开客厅灯")
-    print(response)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Tools Reference
-
-### MQTT Tools
-
-| Tool | Description |
-|------|-------------|
-| `mqtt_connect` | Connect to MQTT broker |
-| `mqtt_publish` | Publish message to topic |
-| `mqtt_subscribe` | Subscribe to topic |
-
-### Device Tools
-
-| Tool | Description |
-|------|-------------|
-| `device_state_get` | Get device state |
-| `device_state_set` | Set device state (memory) |
-| `device_list` | List all devices |
-| `device_control` | Send control command |
-
-## MQTT Topic Design
-
-```
-{prefix}/{device_id}/status   # Device state updates (subscribed)
-{prefix}/{device_id}/command  # Control commands (published)
-```
-
-Example:
-- `home/devices/living_room_light/status`
-- `home/devices/living_room_light/command`
-
-## pi-mono Bridge (Future)
-
-The agent can be used as a pi-mono extension via a TypeScript bridge:
+### 启动 pi
 
 ```bash
-# Install pi-mono extension
-pi install git:github.com/user/pi-device-agent
+# 使用默认配置
+pi
 
-# Use in pi-mono
-pi> /agent device
-pi> 打开客厅灯
+# 或显式指定 provider 和 model
+pi --provider kimi-coding --model k2p5
+
+# 或使用 Moonshot
+pi --provider moonshot --model kimi-k2.5
 ```
 
-## Development
+### 验证 Extension 加载
 
-### Running Tests
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-### Project Structure
+在 pi 交互模式下运行：
 
 ```
-device_agent/
-├── __init__.py
-├── config.py          # Configuration management
-├── types.py           # Type definitions
-├── core/              # Core runtime
-│   ├── tool.py        # Tool base class
-│   ├── runtime.py     # Agent runtime
-│   ├── events.py      # Event stream
-│   └── context.py     # Session context
-├── primitives/        # Low-level building blocks
-│   ├── mqtt.py        # MQTT client
-│   ├── memory.py      # Memory store
-│   └── llm.py         # LLM client
-├── tools/             # Tool implementations
-│   ├── mqtt_tools.py
-│   ├── device_tools.py
-│   └── control_tools.py
-└── standalone/        # CLI interface
-    └── cli.py
+/extensions
 ```
 
-## License
+应该能看到 `device-agent` extension。
 
-MIT
+### 查看可用工具
+
+```
+/tools
+```
+
+应该能看到以下工具：
+- `device_connect` - 连接 MQTT Broker
+- `device_get_status` - 获取设备状态
+- `device_control` - 控制设备
+- `device_list` - 列出设备
+- `device_disconnect` - 断开连接
+
+## 使用方法
+
+### 1. 连接设备
+
+```
+device_connect(topic_prefix="home/living-room/light")
+```
+
+参数：
+- `topic_prefix`: 设备 Topic 前缀（如 `home/living-room/light`）
+- `broker`: MQTT Broker 地址（默认 `broker.emqx.io`）
+- `port`: MQTT 端口（默认 `1883`）
+
+### 2. 获取设备状态
+
+```
+device_get_status(device_id="default")
+```
+
+### 3. 控制设备
+
+```
+device_control(command={"power": true, "brightness": 80})
+```
+
+### 4. 列出所有设备
+
+```
+device_list
+```
+
+### 5. 断开连接
+
+```
+device_disconnect
+```
+
+## MQTT Topic 结构
+
+设备应使用以下 Topic 格式：
+
+```
+{topic_prefix}/status/{device_id}   ← 设备上报状态
+{topic_prefix}/control/{device_id}  ← 接收控制指令
+```
+
+单设备可省略 `device_id` 或使用 `default`。
+
+## 状态存储
+
+设备状态自动保存到 `~/.pi/agent/device-agent-status.json`，每 5 秒自动刷新。
+
+## 故障排除
+
+### 401 Invalid Authentication
+
+- 检查 API key 是否正确
+- 确认 provider 名称（`kimi-coding` 或 `moonshot`）
+- 确认模型名称（`k2p5` 或 `kimi-k2.5`）
+- 运行 `pi --list-models` 查看可用模型
+
+### Extension 未加载
+
+- 检查文件路径：`~/.pi/agent/extensions/device-agent.ts`
+- 运行 `/reload` 重新加载
+- 检查文件语法错误
+
+### MQTT 连接失败
+
+- 检查 broker 地址和端口
+- 确认网络连接
+- 检查 topic_prefix 格式
+
+## 代码说明
+
+### Extension 架构
+
+```typescript
+// 主要组件
+class DeviceStateStore {
+  // 文件存储管理
+  // - 自动保存到 JSON 文件
+  // - 每 5 秒刷新
+}
+
+class MqttManager {
+  // MQTT 连接管理
+  // - 自动重连
+  // - 消息处理
+}
+
+// 5 个 LLM Tools
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({ name: "device_connect", ... });
+  pi.registerTool({ name: "device_get_status", ... });
+  pi.registerTool({ name: "device_control", ... });
+  pi.registerTool({ name: "device_list", ... });
+  pi.registerTool({ name: "device_disconnect", ... });
+}
+```
+
+### 关键特性
+
+- **同步导出**: Extension 使用同步导出函数，确保正确加载
+- **文件存储**: 使用 JSON 文件存储状态，无需 SQLite 编译
+- **Fire-and-forget**: 控制指令不等待响应，QoS 0
+- **自动重连**: MQTT 连接断开后自动重连
+
+## 依赖
+
+- `mqtt`: MQTT 客户端库
+- `@sinclair/typebox`: 参数验证（由 pi 提供）
+- `@mariozechner/pi-coding-agent`: Extension API（由 pi 提供）
+
+## 参考资料
+
+- [pi-mono 文档](https://github.com/badlogic/pi-mono)
+- [Agent Skills 规范](https://agentskills.io/specification)
+- [MQTT 协议](https://mqtt.org/)
